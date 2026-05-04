@@ -78,10 +78,11 @@ const DraggableBall = ({ ball }: DraggableBallProps) => {
     data: ball,
   });
 
-  const style = transform ? {
-    transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
+  const style: React.CSSProperties = {
+    transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
     zIndex: isDragging ? 100 : 1,
-  } : undefined;
+    touchAction: 'none',
+  };
 
   // Blue for positive, Red for negative
   const isPositive = ball.type === 'x' ? ball.value > 0 : ball.value > 0;
@@ -216,7 +217,7 @@ export default function App() {
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 100, tolerance: 5 } })
+    useSensor(TouchSensor, { activationConstraint: { distance: 5 } })
   );
 
   const startNewProblem = useCallback(() => {
