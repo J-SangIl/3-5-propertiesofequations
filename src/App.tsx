@@ -29,7 +29,7 @@ import confetti from 'canvas-confetti';
 
 // --- Types ---
 
-type Mode = 'PRACTICE' | 'EASY' | 'NORMAL';
+type Mode = 'PRACTICE' | 'EASY' | 'NORMAL' | 'HARD';
 
 interface BallData {
   id: string;
@@ -162,10 +162,26 @@ const DropPan = ({ id, balls }: DropPanProps) => {
   );
 };
 
+const PoolDropZone = ({ children }: { children: React.ReactNode }) => {
+  const { setNodeRef, isOver } = useDroppable({ id: 'pool' });
+  return (
+    <div
+      ref={setNodeRef}
+      className={`flex-1 flex flex-wrap gap-3 items-center justify-center relative p-2 rounded-xl transition-all duration-300 ${
+        isOver ? 'bg-indigo-950/50 ring-4 ring-indigo-400/40 scale-102' : ''
+      }`}
+      id="pool"
+    >
+      {children}
+    </div>
+  );
+};
+
 const ScaleVisual = ({ leftWeight, rightWeight, children }: { leftWeight: number, rightWeight: number, children: React.ReactNode[] }) => {
-    // Determine tilt. 0 is level. max is +/- 15 deg
+    // Determine tilt. 0 is level. max is +/- 12 deg
+    // Invert rotation so that the heavier side tilts down (diff > 0 means left is heavier -> rotates counter-clockwise / negative)
     const diff = leftWeight - rightWeight;
-    const tilt = diff === 0 ? 0 : Math.max(-12, Math.min(12, diff * 0.4));
+    const tilt = diff === 0 ? 0 : Math.max(-12, Math.min(12, -diff * 0.4));
 
     return (
         <div className="relative w-full flex flex-col items-center justify-end h-48 md:h-64 overflow-visible" id="scale-container">
@@ -211,7 +227,7 @@ export default function App() {
   const [pool, setPool] = useState<BallData[]>([]);
   const [activeBall, setActiveBall] = useState<BallData | null>(null);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error' | 'warning', message: string } | null>(null);
-  const [solvedCounts, setSolvedCounts] = useState<{ EASY: number, NORMAL: number }>({ EASY: 0, NORMAL: 0 });
+  const [solvedCounts, setSolvedCounts] = useState<{ EASY: number, NORMAL: number, HARD: number }>({ EASY: 0, NORMAL: 0, HARD: 0 });
   const [isChecking, setIsChecking] = useState(false);
   const [isCorrect, setIsCorrect] = useState(false);
 
@@ -223,23 +239,39 @@ export default function App() {
   const startNewProblem = useCallback(() => {
     // Logic to ensure x balls are on only one side in the solution
     const generateProblemV2 = (currentMode: Mode): Problem => {
-      // Reduced xValue range to help stay under 60
-      let xValue = Math.floor(Math.random() * 8) + 2; // 2 to 9
-      if (currentMode === 'NORMAL' && Math.random() > 0.5) xValue = -(Math.floor(Math.random() * 8) + 2);
-      if (currentMode === 'PRACTICE') xValue = Math.floor(Math.random() * 4) + 2;
+      let xValue = 2;
+      let A = 1;
+      let C = 0;
+      let B = 5;
 
-      // Reference: Ax + B = Cx + D
-      const A = Math.floor(Math.random() * 3) + 1; // 1 to 3
-      const C = currentMode === 'EASY' || currentMode === 'PRACTICE' ? Math.floor(Math.random() * A) : Math.floor(Math.random() * 3) - 1;
-      const B = currentMode === 'NORMAL' ? Math.floor(Math.random() * 20) - 10 : Math.floor(Math.random() * 15) + 5;
+      if (currentMode === 'PRACTICE' || currentMode === 'EASY') {
+        xValue = Math.floor(Math.random() * 4) + 2; // 2 to 5
+        A = Math.floor(Math.random() * 2) + 1; // 1 to 2
+        C = Math.floor(Math.random() * A); // 0 to A-1
+        B = Math.floor(Math.random() * 5) + 3; // 3 to 7
+      } else if (currentMode === 'NORMAL') {
+        xValue = Math.floor(Math.random() * 7) + 2; // 2 to 8
+        A = Math.floor(Math.random() * 3) + 1; // 1 to 3
+        C = Math.floor(Math.random() * A); // 0 to A-1
+        B = Math.floor(Math.random() * 12) + 3; // 3 to 14
+      } else {
+        // HARD (old NORMAL)
+        xValue = Math.floor(Math.random() * 8) + 2; // 2 to 9
+        if (Math.random() > 0.5) xValue = -xValue;
+        A = Math.floor(Math.random() * 3) + 1; // 1 to 3
+        C = Math.floor(Math.random() * 3) - 1; // -1 to 1
+        B = Math.floor(Math.random() * 20) - 10; // -10 to 9
+      }
+
       const safeA = A === C ? A + 1 : A;
       let D = (safeA - C) * xValue + B;
 
-      // Ensure reference weights don't exceed 60
+      // Ensure reference weights don't exceed 60 (or 20 for EASY/PRACTICE)
+      const maxRefLimit = (currentMode === 'PRACTICE' || currentMode === 'EASY') ? 20 : 60;
       let refWeight = safeA * xValue + B;
-      if (Math.abs(refWeight) > 60) {
+      if (Math.abs(refWeight) > maxRefLimit) {
         // Fallback to a simpler set if exceeds
-        xValue = 2;
+        xValue = Math.sign(xValue) * 2;
         D = (safeA - C) * xValue + B;
       }
 
@@ -250,13 +282,15 @@ export default function App() {
       for (let i = 0; i < Math.abs(C); i++) refRight.push(createBall('x', Math.sign(C)));
       if (D !== 0) refRight.push(createBall('number', D));
 
-      // Interactive: Varied target weight logic constrained by 60
-      const xCount = currentMode === 'PRACTICE' ? 1 : (Math.floor(Math.random() * 2) + 2);
-      const xBalls = Array.from({ length: xCount }, () => createBall('x', currentMode === 'NORMAL' ? (Math.random() > 0.5 ? 1 : -1) : 1));
+      // Interactive: Varied target weight logic constrained appropriately
+      const isEasyDifficulty = (currentMode === 'PRACTICE' || currentMode === 'EASY');
+
+      const xCount = isEasyDifficulty ? 1 : (Math.floor(Math.random() * 2) + 2); // 1 for EASY/PRACTICE, 2 to 3 for NORMAL/HARD
+      const xBalls = Array.from({ length: xCount }, () => createBall('x', (currentMode === 'HARD') ? (Math.random() > 0.5 ? 1 : -1) : 1));
       const xTotalWeight = xBalls.reduce((acc, b) => acc + b.value * xValue, 0);
 
       let targetW: number;
-      if (currentMode === 'PRACTICE') {
+      if (isEasyDifficulty) {
         targetW = Math.max(Math.abs(xTotalWeight) + 2, Math.floor(Math.random() * 5) + 10);
         if (targetW > 20) targetW = 20;
       } else {
@@ -272,7 +306,7 @@ export default function App() {
       // Split numSide1Value into 1 or 2 balls
       let side1Balls: BallData[] = [...xBalls];
       if (numSide1Value !== 0) {
-        if (Math.abs(numSide1Value) > 15 && Math.random() > 0.4 && currentMode !== 'PRACTICE') {
+        if (Math.abs(numSide1Value) > 15 && Math.random() > 0.4 && !isEasyDifficulty) {
              const split = Math.floor(numSide1Value * (Math.random() * 0.4 + 0.3));
              side1Balls.push(createBall('number', split));
              side1Balls.push(createBall('number', numSide1Value - split));
@@ -284,7 +318,7 @@ export default function App() {
       // Side 2: weight = numSide2 = targetW
       let side2Balls: BallData[] = [];
       let remaining = targetW;
-      const ballCount = (currentMode === 'PRACTICE' || Math.random() > 0.6) ? 2 : 3;
+      const ballCount = (isEasyDifficulty || Math.random() > 0.6) ? 2 : 3;
       for (let i = 0; i < ballCount - 1; i++) {
           const val = Math.floor(remaining * (Math.random() * 0.4 + 0.3));
           if (val === 0) continue;
@@ -378,7 +412,7 @@ export default function App() {
   return (
     <div className="h-screen bg-slate-50 font-sans flex flex-col p-6 gap-6 overflow-hidden select-none" id="main-container">
       {/* Header Section */}
-      <header className="flex justify-between items-center bg-white p-4 rounded-2xl shadow-sm border border-slate-200" id="header">
+      <header className="flex flex-col md:flex-row justify-between items-center bg-white p-4 rounded-2xl shadow-sm border border-slate-200 gap-4" id="header">
         <div className="flex items-center gap-3">
           <div className="bg-indigo-600 p-2 rounded-lg shadow-md shadow-indigo-100">
             <ScaleIcon className="h-6 w-6 text-white" />
@@ -386,17 +420,19 @@ export default function App() {
           <h1 className="text-xl font-black text-slate-800 leading-tight">등식의 성질</h1>
         </div>
         
-        <div className="flex items-center gap-4">
-          <div className="hidden md:flex bg-slate-100 p-1 rounded-xl border border-slate-200">
-            <button onClick={() => setMode('PRACTICE')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${mode === 'PRACTICE' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-500 hover:bg-slate-200'}`} id="btn-practice">연습 모드</button>
-            <button onClick={() => setMode('EASY')} className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${mode === 'EASY' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:bg-slate-200'}`} id="btn-easy">쉬운 모드</button>
-            <button onClick={() => setMode('NORMAL')} className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${mode === 'NORMAL' ? 'bg-white text-purple-600 shadow-sm' : 'text-slate-500 hover:bg-slate-200'}`} id="btn-normal">일반 모드</button>
+        <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
+          <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200 w-full md:w-auto">
+            <button onClick={() => setMode('PRACTICE')} className={`flex-1 md:flex-initial px-3 md:px-4 py-1.5 md:py-2 rounded-lg text-xs md:text-sm font-bold transition-all ${mode === 'PRACTICE' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-500 hover:bg-slate-200'}`} id="btn-practice">연습 모드</button>
+            <button onClick={() => setMode('EASY')} className={`flex-1 md:flex-initial px-3 md:px-4 py-1.5 md:py-2 rounded-lg text-xs md:text-sm font-bold transition-all ${mode === 'EASY' ? 'bg-white text-sky-600 shadow-sm' : 'text-slate-500 hover:bg-slate-200'}`} id="btn-easy">쉬운 모드</button>
+            <button onClick={() => setMode('NORMAL')} className={`flex-1 md:flex-initial px-3 md:px-4 py-1.5 md:py-2 rounded-lg text-xs md:text-sm font-bold transition-all ${mode === 'NORMAL' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:bg-slate-200'}`} id="btn-normal">일반 모드</button>
+            <button onClick={() => setMode('HARD')} className={`flex-1 md:flex-initial px-3 md:px-4 py-1.5 md:py-2 rounded-lg text-xs md:text-sm font-bold transition-all ${mode === 'HARD' ? 'bg-white text-purple-600 shadow-sm' : 'text-slate-500 hover:bg-slate-200'}`} id="btn-hard">어려운 모드</button>
           </div>
-          <div className="flex items-center gap-3 bg-indigo-50 px-4 py-2 rounded-xl border border-indigo-100">
+          <div className="flex items-center justify-center gap-3 bg-indigo-50 px-4 py-2 rounded-xl border border-indigo-100 w-full sm:w-auto shrink-0">
             <Trophy className="w-5 h-5 text-amber-500" />
-            <div className="flex gap-3 text-sm font-black">
-              <span className="text-indigo-600">E: {solvedCounts.EASY}</span>
-              <span className="text-purple-600">N: {solvedCounts.NORMAL}</span>
+            <div className="flex gap-3 text-sm font-black text-slate-700">
+              <span className="text-emerald-600">E: {solvedCounts.EASY}</span>
+              <span className="text-indigo-600">N: {solvedCounts.NORMAL}</span>
+              <span className="text-purple-600">H: {solvedCounts.HARD}</span>
             </div>
           </div>
         </div>
@@ -487,7 +523,7 @@ export default function App() {
                 <AlertCircle className="w-3 h-3" />
                 사용 가능한 공
               </div>
-              <div id="pool" className="flex-1 flex flex-wrap gap-3 items-center justify-center relative">
+              <PoolDropZone>
                 <AnimatePresence>
                   {pool.map((ball) => <DraggableBall key={ball.id} ball={ball} />)}
                 </AnimatePresence>
@@ -505,7 +541,7 @@ export default function App() {
                      <ChevronRight className="w-6 h-6" />
                    </motion.button>
                 )}
-              </div>
+              </PoolDropZone>
             </div>
 
             {/* Feedback Message */}
