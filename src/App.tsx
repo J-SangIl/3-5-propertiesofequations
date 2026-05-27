@@ -377,6 +377,7 @@ export default function App() {
   };
 
   const checkSolution = () => {
+    if (isCorrect) return;
     if (pool.length > 0) {
       setFeedback({ type: 'warning', message: '공을 모두 사용해야 합니다.' });
       return;
@@ -533,8 +534,9 @@ export default function App() {
                    <motion.button 
                      initial={{ opacity: 0, scale: 0.8 }}
                      animate={{ opacity: 1, scale: 1 }}
+                     disabled={isCorrect}
                      onClick={checkSolution} 
-                     className="px-16 py-5 bg-amber-400 hover:bg-amber-300 text-indigo-900 font-black rounded-2xl transition-all shadow-lg shadow-amber-500/40 text-xl active:translate-y-1 flex items-center justify-center gap-2 border-4 border-amber-200" 
+                     className="px-16 py-5 bg-amber-400 hover:bg-amber-300 text-indigo-900 font-black rounded-2xl transition-all shadow-lg shadow-amber-500/40 text-xl active:translate-y-1 flex items-center justify-center gap-2 border-4 border-amber-200 disabled:opacity-50 disabled:pointer-events-none" 
                      id="btn-complete"
                    >
                      완료
